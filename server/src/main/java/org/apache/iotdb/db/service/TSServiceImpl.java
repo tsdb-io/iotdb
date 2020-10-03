@@ -18,24 +18,6 @@
  */
 package org.apache.iotdb.db.service;
 
-import static org.apache.iotdb.db.conf.IoTDBConfig.PATH_PATTERN;
-import static org.apache.iotdb.db.qp.physical.sys.ShowPlan.ShowContentType.TIMESERIES;
-
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.sql.SQLException;
-import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.Collectors;
 import org.antlr.v4.runtime.misc.ParseCancellationException;
 import org.apache.iotdb.db.auth.AuthException;
 import org.apache.iotdb.db.auth.AuthorityChecker;
@@ -60,7 +42,6 @@ import org.apache.iotdb.db.qp.constant.SQLConstant;
 import org.apache.iotdb.db.qp.executor.IPlanExecutor;
 import org.apache.iotdb.db.qp.executor.PlanExecutor;
 import org.apache.iotdb.db.qp.logical.Operator.OperatorType;
-import org.apache.iotdb.db.qp.logical.sys.AuthorOperator.AuthorType;
 import org.apache.iotdb.db.qp.physical.PhysicalPlan;
 import org.apache.iotdb.db.qp.physical.crud.AggregationPlan;
 import org.apache.iotdb.db.qp.physical.crud.AlignByDevicePlan;
@@ -117,6 +98,7 @@ import org.apache.iotdb.service.rpc.thrift.TSOpenSessionResp;
 import org.apache.iotdb.service.rpc.thrift.TSProtocolVersion;
 import org.apache.iotdb.service.rpc.thrift.TSQueryDataSet;
 import org.apache.iotdb.service.rpc.thrift.TSQueryNonAlignDataSet;
+import org.apache.iotdb.service.rpc.thrift.TSRawDataQueryReq;
 import org.apache.iotdb.service.rpc.thrift.TSSetTimeZoneReq;
 import org.apache.iotdb.service.rpc.thrift.TSStatus;
 import org.apache.iotdb.tsfile.exception.filter.QueryFilterOptimizationException;
@@ -130,7 +112,24 @@ import org.apache.thrift.TException;
 import org.apache.thrift.server.ServerContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.iotdb.service.rpc.thrift.TSRawDataQueryReq;
+
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.sql.SQLException;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.stream.Collectors;
+
+import static org.apache.iotdb.db.qp.physical.sys.ShowPlan.ShowContentType.TIMESERIES;
 
 
 /**
@@ -1449,13 +1448,8 @@ public class TSServiceImpl implements TSIService.Iface, ServerContext {
         return RpcUtils.getStatus(TSStatusCode.NOT_LOGIN_ERROR);
       }
 
-      TSStatus status = checkPathValidity(storageGroup);
-      if (status != null) {
-        return status;
-      }
-
       SetStorageGroupPlan plan = new SetStorageGroupPlan(new PartialPath(storageGroup));
-      status = checkAuthority(plan, sessionId);
+      TSStatus status = checkAuthority(plan, sessionId);
       if (status != null) {
         return new TSStatus(status);
       }
@@ -1500,16 +1494,12 @@ public class TSServiceImpl implements TSIService.Iface, ServerContext {
       if (auditLogger.isDebugEnabled()) {
         auditLogger.debug("Session-{} create timeseries {}", currSessionId.get(), req.getPath());
       }
-      TSStatus status = checkPathValidity(req.path);
-      if (status != null) {
-        return status;
-      }
 
       CreateTimeSeriesPlan plan = new CreateTimeSeriesPlan(new PartialPath(req.path),
           TSDataType.values()[req.dataType], TSEncoding.values()[req.encoding],
           CompressionType.values()[req.compressor], req.props, req.tags, req.attributes,
           req.measurementAlias);
-      status = checkAuthority(plan, req.getSessionId());
+      TSStatus status = checkAuthority(plan, req.getSessionId());
       if (status != null) {
         return status;
       }
@@ -1542,14 +1532,7 @@ public class TSServiceImpl implements TSIService.Iface, ServerContext {
             req.attributesList == null ? null : req.attributesList.get(i),
             req.measurementAliasList == null ? null : req.measurementAliasList.get(i));
 
-        TSStatus status = checkPathValidity(req.paths.get(i));
-        if (status != null) {
-          // path naming is not valid
-          statusList.add(status);
-          continue;
-        }
-
-        status = checkAuthority(plan, req.getSessionId());
+        TSStatus status = checkAuthority(plan, req.getSessionId());
         if (status != null) {
           // not authorized
           statusList.add(status);
@@ -1647,15 +1630,6 @@ public class TSServiceImpl implements TSIService.Iface, ServerContext {
     return execRet
         ? RpcUtils.getStatus(TSStatusCode.SUCCESS_STATUS, "Execute successfully")
         : RpcUtils.getStatus(TSStatusCode.EXECUTE_STATEMENT_ERROR);
-  }
-
-  private TSStatus checkPathValidity(String path) {
-    if (!PATH_PATTERN.matcher(path).matches()) {
-      logger.warn("Illegal path: {}", path);
-      return RpcUtils.getStatus(TSStatusCode.PATH_ILLEGAL, path + " path is illegal");
-    } else {
-      return null;
-    }
   }
 
   private long generateQueryId(boolean isDataQuery) {
